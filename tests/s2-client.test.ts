@@ -5,6 +5,7 @@ import {
 	XAI_BILLING_URL,
 	XAI_USER_URL,
 	createBillingClient,
+	resolveXaiAuth,
 } from "../extensions/xai-usage.ts";
 import { fakeFetch } from "./helpers.ts";
 
@@ -93,4 +94,45 @@ test("error message redacts bearer token and userId", async () => {
 		assert.doesNotMatch(res.message, /oauth-access/);
 		assert.doesNotMatch(res.message, /fixture-user-0001/);
 	}
+});
+
+test("resolveXaiAuth classifies xai OAuth even when the active model is anthropic", async () => {
+	let fetched = 0;
+	const ui = { setStatus() {}, notify() {}, theme: { fg: (_r: string, t: string) => t } };
+	const ctx = {
+		ui,
+		model: { provider: "anthropic", id: "sonnet" },
+		modelRegistry: {
+			isUsingOAuth: (m: { provider?: string }) => m.provider === "xai",
+			getProviderAuthStatus: () => ({ configured: true }),
+			getProviderAuth: async () => {
+				fetched += 1;
+				return { auth: { apiKey: "oauth-tok" } };
+			},
+		},
+	};
+	const res = await resolveXaiAuth(ctx, { requireActiveModel: false, wantToken: true });
+	assert.equal(res.status, "oauth");
+	if (res.status === "oauth") assert.equal(res.token, "oauth-tok");
+	assert.equal(fetched, 1);
+});
+
+test("resolveXaiAuth does not send getProviderAuth for an xai API key when Claude is the active OAuth model", async () => {
+	let fetched = 0;
+	const ui = { setStatus() {}, notify() {}, theme: { fg: (_r: string, t: string) => t } };
+	const ctx = {
+		ui,
+		model: { provider: "anthropic", id: "sonnet" },
+		modelRegistry: {
+			isUsingOAuth: (m: { provider?: string }) => m.provider === "anthropic",
+			getProviderAuthStatus: () => ({ configured: true }),
+			getProviderAuth: async () => {
+				fetched += 1;
+				return { auth: { apiKey: "sk-api" } };
+			},
+		},
+	};
+	const res = await resolveXaiAuth(ctx, { requireActiveModel: false, wantToken: true });
+	assert.equal(res.status, "api-key");
+	assert.equal(fetched, 0);
 });

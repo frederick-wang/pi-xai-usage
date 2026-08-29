@@ -625,7 +625,6 @@ function assertBoundedJson(value: unknown, depth = 0, budget = { nodes: 0 }): vo
 }
 
 export function parseUserId(value: unknown): string {
-	assertBoundedJson(value);
 	const userId = isRecord(value) ? value["userId"] : undefined;
 	if (typeof userId !== "string" || !USER_ID_PATTERN.test(userId)) {
 		throw new UsageError("identity", ERR_IDENTITY);
@@ -647,9 +646,10 @@ export function parseSubscriptionTier(value: unknown): string | undefined {
 function optionalCentsUsd(value: unknown): number | undefined {
 	if (value === undefined || value === null) return undefined;
 	if (!isRecord(value)) throw new UsageError("parse", ERR_PARSE);
-	const cents = value["val"] === undefined ? 0 : value["val"];
-	if (!Number.isSafeInteger(cents)) throw new UsageError("parse", ERR_PARSE);
-	return (cents as number) / 100;
+	let cents: unknown = value["val"] === undefined ? 0 : value["val"];
+	if (typeof cents === "string" && /^-?\d+$/.test(cents)) cents = Number(cents);
+	if (typeof cents !== "number" || !Number.isSafeInteger(cents)) throw new UsageError("parse", ERR_PARSE);
+	return cents / 100;
 }
 
 function optionalTimestampMs(value: unknown): number | undefined {
@@ -871,9 +871,6 @@ export function evaluateAlerts(state: AlertState | null, snapshot: UsageSnapshot
 	}
 	let alerted80 = prev?.alerted80 ?? false;
 	let alerted95 = prev?.alerted95 ?? false;
-	if (hasIdentity && prev && (prev.periodStart !== start || prev.periodEnd !== end) && prev.fingerprint === snapshot.fingerprint) {
-		// keyed already by period; different key means fresh
-	}
 	if (!hasIdentity && prev?.lastPct !== null && prev?.lastPct !== undefined && prev.lastPct - pct >= ALERT_DROP_REARM) {
 		alerted80 = false;
 		alerted95 = false;
@@ -943,6 +940,7 @@ export function createQuotaSnapshotStore(
 	return {
 		append(snap) {
 			try {
+				try { nodeFs.mkdirSync(dir, { recursive: true }); } catch { /* */ }
 				const all = parseAll();
 				all.push(snap);
 				if (all.length > SNAPSHOT_COMPACT_AT) {
@@ -973,13 +971,19 @@ export interface BillingClientLike {
 	resetBreaker(): void;
 }
 
+const RETRY_AFTER_CAP_MS = 15 * 60_000;
+
 function parseRetryAfter(value: string | null, now: number): number {
-	if (value === null) return 60_000;
-	const seconds = Number(value);
-	if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-	const date = Date.parse(value);
-	if (!Number.isNaN(date)) return Math.max(0, date - now);
-	return 60_000;
+	let ms = 60_000;
+	if (value !== null) {
+		const seconds = Number(value);
+		if (Number.isFinite(seconds) && seconds >= 0) ms = seconds * 1000;
+		else {
+			const date = Date.parse(value);
+			if (!Number.isNaN(date)) ms = Math.max(0, date - now);
+		}
+	}
+	return Math.min(ms, RETRY_AFTER_CAP_MS);
 }
 
 function redact(message: string, secrets: string[]): string {
@@ -1212,52 +1216,43 @@ function tokenFromAuthResult(resolution: unknown): string | null {
 	return authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() || null : null;
 }
 
-export async function resolveXaiAuth(ctx: CtxLike, opts: { requireActiveModel: boolean }): Promise<AuthResolution> {
+/** Always classify against provider `xai`, never against the active model's provider. */
+export function classifyXaiAuth(ctx: CtxLike, opts: { requireActiveModel: boolean }): Exclude<AuthResolution, { status: "oauth"; token: string }> | { status: "oauth" } {
 	if (opts.requireActiveModel) {
 		if (!isXaiProvider(ctx.model?.provider)) return { status: "none" };
 		if (!officialModelOrigin(ctx.model?.baseUrl)) return { status: "bad-origin" };
 	}
 	const registry = ctx.modelRegistry;
-	const model = ctx.model;
 	let usingOAuth = false;
-	let subscription = false;
 	try {
-		if (model && typeof registry?.isUsingOAuth === "function") usingOAuth = registry.isUsingOAuth(model) === true;
-		subscription = registry?.getProvider?.(PROVIDER_ID)?.auth?.oauth?.isSubscription === true;
+		if (typeof registry?.isUsingOAuth === "function") {
+			usingOAuth = registry.isUsingOAuth({ provider: PROVIDER_ID }) === true;
+		}
 	} catch {
 		usingOAuth = false;
 	}
-	if (opts.requireActiveModel && usingOAuth && !officialModelOrigin(ctx.model?.baseUrl)) {
-		return { status: "bad-origin" };
-	}
-	if (usingOAuth && subscription) {
-		try {
-			const resolved = await registry?.getProviderAuth?.(PROVIDER_ID);
-			const token = tokenFromAuthResult(resolved);
-			if (!token) return { status: "auth-error" };
-			return { status: "oauth", token };
-		} catch {
-			return { status: "auth-error" };
-		}
-	}
+	if (usingOAuth) return { status: "oauth" };
 	let configured = false;
 	try {
 		configured = registry?.getProviderAuthStatus?.(PROVIDER_ID)?.configured === true;
 	} catch {
 		configured = false;
 	}
-	if (configured) return { status: "api-key" };
-	if (!opts.requireActiveModel) {
-		try {
-			const resolved = await registry?.getProviderAuth?.(PROVIDER_ID);
-			const token = tokenFromAuthResult(resolved);
-			if (token && usingOAuth) return { status: "oauth", token };
-			if (token) return { status: "api-key" };
-		} catch {
-			return { status: "auth-error" };
-		}
+	return configured ? { status: "api-key" } : { status: "none" };
+}
+
+export async function resolveXaiAuth(ctx: CtxLike, opts: { requireActiveModel: boolean; wantToken?: boolean }): Promise<AuthResolution> {
+	const classified = classifyXaiAuth(ctx, opts);
+	if (classified.status !== "oauth") return classified;
+	if (opts.wantToken === false) return { status: "oauth", token: "" };
+	try {
+		const resolved = await ctx.modelRegistry?.getProviderAuth?.(PROVIDER_ID);
+		const token = tokenFromAuthResult(resolved);
+		if (!token) return { status: "auth-error" };
+		return { status: "oauth", token };
+	} catch {
+		return { status: "auth-error" };
 	}
-	return { status: "none" };
 }
 
 export interface AlertStore {
@@ -1272,7 +1267,7 @@ export interface ExtensionDeps {
 	setInterval?: typeof setInterval;
 	clearInterval?: typeof clearInterval;
 	billingClientFor(): BillingClientLike;
-	authFor(ctx: CtxLike, opts: { requireActiveModel: boolean }): Promise<AuthResolution>;
+	authFor(ctx: CtxLike, opts: { requireActiveModel: boolean; wantToken?: boolean }): Promise<AuthResolution>;
 	snapshotStore?: QuotaSnapshotStore;
 	alertStore?: AlertStore;
 }
@@ -1288,8 +1283,10 @@ export function createExtension(deps: ExtensionDeps) {
 		const lang = resolveLang(deps.env ?? {});
 		const warnedNeedOAuth = { v: false };
 		const warnedNoKey = { v: false };
+		const warnedAuth = { v: false };
 
 		let active = false;
+		let billingUnavailable = false;
 		let snapshot: UsageSnapshot | null = null;
 		let stale = false;
 		let lastFetchAt = Number.NEGATIVE_INFINITY;
@@ -1372,7 +1369,7 @@ export function createExtension(deps: ExtensionDeps) {
 			const ui = ctx.ui;
 			void (async () => {
 				try {
-					const auth = await deps.authFor(ctx, { requireActiveModel: true });
+					const auth = await deps.authFor(ctx, { requireActiveModel: true, wantToken: true });
 					if (gen !== generation) return;
 					if (auth.status !== "oauth") {
 						if (auth.status === "api-key") {
@@ -1385,7 +1382,7 @@ export function createExtension(deps: ExtensionDeps) {
 						}
 						return;
 					}
-					const res = await deps.billingClientFor().fetchUsage(auth.token, ctx.signal);
+					const res = await deps.billingClientFor().fetchUsage(auth.token);
 					if (gen !== generation) return;
 					if (res.status === "ok") {
 						retryDeadline = 0;
@@ -1406,7 +1403,7 @@ export function createExtension(deps: ExtensionDeps) {
 						nextAllowedAt = Math.max(retryDeadline, Math.min(nextAllowedAt, Math.max(now(), lastFetchAt + throttleMs())));
 						const alerts = evaluateAlerts(alertState, res.snapshot);
 						alertState = alerts.state;
-						alertStore.save(alertState);
+						if (alerts.emitted.length > 0) alertStore.save(alertState);
 						for (const e of alerts.emitted) {
 							ui.notify(msg(lang, "alertCrossed", { pct: String(e.pct), tier: String(e.tier) }), e.tier === 95 ? "error" : "warning");
 						}
@@ -1414,12 +1411,22 @@ export function createExtension(deps: ExtensionDeps) {
 						retryDeadline = Math.max(retryDeadline, now() + res.retryAfterMs);
 						nextAllowedAt = Math.max(nextAllowedAt, retryDeadline);
 						if (snapshot !== null) stale = true;
+					} else if (res.code === "entitlement") {
+						billingUnavailable = true;
+						active = false;
+						ui.notify(msg(lang, "entitlement"), "warning");
+						ui.setStatus(STATUS_KEY, ui.theme.fg("dim", "xAI no billing"));
+						return;
+					} else if (res.code === "auth") {
+						if (!warnedAuth.v) {
+							warnedAuth.v = true;
+							ui.notify(msg(lang, "fetchFailed"), "error");
+						}
+						if (snapshot !== null) stale = true;
+						else ui.setStatus(STATUS_KEY, ui.theme.fg("error", "xAI auth error"));
+						return snapshot !== null ? render(ui) : undefined;
 					} else if (snapshot !== null) {
 						stale = true;
-					} else if (res.code === "entitlement") {
-						ui.setStatus(STATUS_KEY, ui.theme.fg("dim", "xAI no billing"));
-						active = false;
-						return;
 					}
 					render(ui);
 				} catch {
@@ -1434,6 +1441,7 @@ export function createExtension(deps: ExtensionDeps) {
 
 		async function activate(ctx: CtxLike, fromSelect: boolean): Promise<void> {
 			lastUi = ctx.ui;
+			void fromSelect;
 			if (!isXaiProvider(ctx.model?.provider)) {
 				active = false;
 				snapshot = null;
@@ -1449,10 +1457,12 @@ export function createExtension(deps: ExtensionDeps) {
 				ctx.ui.setStatus(STATUS_KEY, undefined);
 				return;
 			}
-			if (!isInteractive(ctx) && fromSelect === false && ctx.mode === "print") {
+			if (billingUnavailable) {
+				active = false;
+				ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("dim", "xAI no billing"));
 				return;
 			}
-			const auth = await deps.authFor(ctx, { requireActiveModel: true });
+			const auth = await deps.authFor(ctx, { requireActiveModel: true, wantToken: false });
 			if (auth.status === "bad-origin") {
 				active = false;
 				ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -1528,6 +1538,7 @@ export function createExtension(deps: ExtensionDeps) {
 
 		pi.on("model_select", async (event, ctx) => {
 			generation += 1;
+			billingUnavailable = false;
 			if (!isInteractive(ctx as CtxLike)) return;
 			await activate({ ...(ctx as CtxLike), model: event.model }, true);
 		});
@@ -1578,7 +1589,7 @@ export function createExtension(deps: ExtensionDeps) {
 			description: "Show xAI SuperGrok usage (add --json for raw output)",
 			handler: async (args: string, ctxRaw: unknown) => {
 				const ctx = ctxRaw as CtxLike;
-				const auth = await deps.authFor(ctx, { requireActiveModel: false });
+				const auth = await deps.authFor(ctx, { requireActiveModel: false, wantToken: true });
 				if (auth.status === "api-key") {
 					ctx.ui.notify(msg(lang, "needOAuth"), "error");
 					return;

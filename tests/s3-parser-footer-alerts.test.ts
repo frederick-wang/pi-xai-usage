@@ -74,6 +74,18 @@ test("parseUsage hostile control chars stripped from tier", () => {
 	assert.equal(snap.tier, "SuperGrok");
 });
 
+test("parseUsage accepts protobuf-json string cent wrappers", () => {
+	const snap = parseUsage({
+		config: {
+			creditUsagePercent: 10,
+			onDemandCap: { val: "5000" },
+			onDemandUsed: { val: "300" },
+		},
+	}, USER);
+	assert.equal(snap.onDemandCapUsd, 50);
+	assert.equal(snap.onDemandUsedUsd, 3);
+});
+
 test("parseUsage percent out of range throws", () => {
 	assert.throws(() => parseUsage({ config: { creditUsagePercent: 101 } }, USER));
 });

@@ -225,6 +225,18 @@ test("/xai-usage --json in print writes schema 1; rpc refuses stdout", async () 
 	assert.ok(log.notifications.some((n) => /TUI or print/.test(n.message)));
 });
 
+test("entitlement does not refetch every turn", async () => {
+	const h = harness({
+		queue: [{ status: "error", message: "no billing", code: "entitlement" }],
+	});
+	await h.select("xai");
+	await settle();
+	assert.equal(h.calls.length, 1);
+	await h.turnEnd();
+	await settle();
+	assert.equal(h.calls.length, 1);
+});
+
 test("proxy origin never fetches", async () => {
 	const h = harness();
 	const log = await h.select("xai", "https://proxy.example.test/v1");
