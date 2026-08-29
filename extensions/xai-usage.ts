@@ -1157,7 +1157,7 @@ export function createBillingClient(deps: { fetchImpl: typeof fetch; timeoutMs?:
 	};
 }
 
-function hasMoney(n: number | undefined): boolean {
+function hasMoney(n: number | undefined): n is number {
 	return n !== undefined && n !== 0;
 }
 
@@ -1176,8 +1176,9 @@ export function buildReportText(snapshot: UsageSnapshot, opts: { now: number; la
 		const cap = snapshot.onDemandCapUsd !== undefined ? `$${snapshot.onDemandCapUsd.toFixed(2)}` : "?";
 		lines.push(`  ${msg(lang, "segOnDemand")}  ${used} / ${cap}`);
 	}
-	if (hasMoney(snapshot.prepaidUsd)) {
-		lines.push(`  ${msg(lang, "segPrepaid")}  $${snapshot.prepaidUsd.toFixed(2)}`);
+	const prepaid = snapshot.prepaidUsd;
+	if (hasMoney(prepaid)) {
+		lines.push(`  ${msg(lang, "segPrepaid")}  $${prepaid.toFixed(2)}`);
 	}
 	return lines.join("\n");
 }
