@@ -1,0 +1,3 @@
+# Identity-first billing; no billing-only fallback
+
+Grok Build binds billing to a proxy-canonical `userId`. We GET `https://cli-chat-proxy.grok.com/v1/user?include=subscription`, validate a conservative `userId` token, then GET `https://cli-chat-proxy.grok.com/v1/billing?format=credits` with `x-userid` only on that second request. Identity failure does not fall back to billing without the header. The `userId` is cached in memory per credential for the process, never displayed, never written to disk or toasts; errors redact it. One credits endpoint; legacy monthly cents are parsed from that payload, not from a second `/v1/billing` GET.

@@ -1,0 +1,44 @@
+{
+  "name": "pi-xai-usage",
+  "version": "0.1.0",
+  "description": "xAI SuperGrok / X Premium subscription usage in the pi footer — status bar, threshold alerts, /xai-usage report. Unofficial, not affiliated with xAI.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "xai",
+    "grok",
+    "usage",
+    "quota"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frederick-wang/pi-xai-usage.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "extensions",
+    "README.zh-CN.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test 'tests/*.test.ts'",
+    "live-check": "node scripts/live-check.ts"
+  },
+  "packageManager": "pnpm@11.24.0"
+}
