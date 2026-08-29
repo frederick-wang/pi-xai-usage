@@ -1218,9 +1218,11 @@ function tokenFromAuthResult(resolution: unknown): string | null {
 
 /** Always classify against provider `xai`, never against the active model's provider. */
 export function classifyXaiAuth(ctx: CtxLike, opts: { requireActiveModel: boolean }): Exclude<AuthResolution, { status: "oauth"; token: string }> | { status: "oauth" } {
+	if (isXaiProvider(ctx.model?.provider) && !officialModelOrigin(ctx.model?.baseUrl)) {
+		return { status: "bad-origin" };
+	}
 	if (opts.requireActiveModel) {
 		if (!isXaiProvider(ctx.model?.provider)) return { status: "none" };
-		if (!officialModelOrigin(ctx.model?.baseUrl)) return { status: "bad-origin" };
 	}
 	const registry = ctx.modelRegistry;
 	let usingOAuth = false;
@@ -1372,13 +1374,22 @@ export function createExtension(deps: ExtensionDeps) {
 					const auth = await deps.authFor(ctx, { requireActiveModel: true, wantToken: true });
 					if (gen !== generation) return;
 					if (auth.status !== "oauth") {
+						active = false;
 						if (auth.status === "api-key") {
-							active = false;
 							if (!warnedNeedOAuth.v) {
 								warnedNeedOAuth.v = true;
 								ui.notify(msg(lang, "needOAuth"), "warning");
 							}
 							ui.setStatus(STATUS_KEY, ui.theme.fg("dim", "xAI need OAuth"));
+						} else if (auth.status === "bad-origin") {
+							ui.setStatus(STATUS_KEY, undefined);
+						} else if (auth.status === "auth-error") {
+							ui.setStatus(STATUS_KEY, ui.theme.fg("error", "xAI auth error"));
+						} else if (snapshot !== null) {
+							stale = true;
+							render(ui);
+						} else {
+							ui.setStatus(STATUS_KEY, ui.theme.fg("dim", "xAI no key"));
 						}
 						return;
 					}
@@ -1592,6 +1603,10 @@ export function createExtension(deps: ExtensionDeps) {
 				const auth = await deps.authFor(ctx, { requireActiveModel: false, wantToken: true });
 				if (auth.status === "api-key") {
 					ctx.ui.notify(msg(lang, "needOAuth"), "error");
+					return;
+				}
+				if (auth.status === "bad-origin") {
+					ctx.ui.notify(msg(lang, "fetchFailed"), "error");
 					return;
 				}
 				if (auth.status !== "oauth") {
