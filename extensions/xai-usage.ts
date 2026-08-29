@@ -84,10 +84,13 @@ const MESSAGES: Record<Lang, Record<string, (v: MsgVars) => string>> = {
 		segIncluded: () => "Included allowance",
 		segOnDemand: () => "On-demand",
 		segPrepaid: () => "Prepaid balance",
-		periodWeekly: () => "Weekly",
-		periodMonthly: () => "Monthly",
-		periodUnknown: () => "Current period",
+		periodWeekly: () => "weekly",
+		periodMonthly: () => "monthly",
+		periodUnknown: () => "current period",
 		used: () => "used",
+		usedPct: (v) => `${v.pct}% used`,
+		usedUnknown: () => "unknown",
+		resetLabel: () => "Resets",
 		resetsIn: (v) => `resets in ${v.t}`,
 		pressClose: () => "Press Enter, Esc, or Ctrl+C to close",
 		pressCloseShort: () => "Esc to close",
@@ -110,6 +113,9 @@ const MESSAGES: Record<Lang, Record<string, (v: MsgVars) => string>> = {
 		periodMonthly: () => "月",
 		periodUnknown: () => "当前周期",
 		used: () => "已用",
+		usedPct: (v) => `已用 ${v.pct}%`,
+		usedUnknown: () => "未知",
+		resetLabel: () => "重置",
 		resetsIn: (v) => `${v.t} 后重置`,
 		pressClose: () => "按 Enter、Esc 或 Ctrl+C 关闭",
 		pressCloseShort: () => "Esc 关闭",
@@ -762,7 +768,9 @@ export function renderBar(percentage: number | null, theme: FooterTheme): string
 	return theme.fg(colorRoleFor(percentage === null ? null : Math.round(percentage)), "█".repeat(filled)) + theme.fg("dim", "░".repeat(width - filled));
 }
 
-export function formatReset(resetMs: number | undefined, now: number): string {
+const WEEKDAYS_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"] as const;
+
+export function formatReset(resetMs: number | undefined, now: number, lang: Lang = "en"): string {
 	if (resetMs === undefined || !Number.isFinite(resetMs) || resetMs <= now) return "";
 	const diff = resetMs - now;
 	if (diff < 24 * HOUR_MS) {
@@ -771,11 +779,12 @@ export function formatReset(resetMs: number | undefined, now: number): string {
 		return h > 0 ? `${h}h ${m}m` : `${m}m`;
 	}
 	const at = new Date(resetMs);
+	const hh = String(at.getHours()).padStart(2, "0");
+	const mm = String(at.getMinutes()).padStart(2, "0");
 	if (diff < 7 * 24 * HOUR_MS) {
-		const hh = String(at.getHours()).padStart(2, "0");
-		const mm = String(at.getMinutes()).padStart(2, "0");
-		return `${WEEKDAYS[at.getDay()]} ${hh}:${mm}`;
+		return lang === "zh" ? `${WEEKDAYS_ZH[at.getDay()]} ${hh}:${mm}` : `${WEEKDAYS[at.getDay()]} ${hh}:${mm}`;
 	}
+	if (lang === "zh") return `${at.getMonth() + 1}月${at.getDate()}日`;
 	return `${MONTHS[at.getMonth()]}${String(at.getDate()).padStart(2, "0")}`;
 }
 
@@ -1148,21 +1157,26 @@ export function createBillingClient(deps: { fetchImpl: typeof fetch; timeoutMs?:
 	};
 }
 
+function hasMoney(n: number | undefined): boolean {
+	return n !== undefined && n !== 0;
+}
+
 export function buildReportText(snapshot: UsageSnapshot, opts: { now: number; lang?: Lang }): string {
 	const lang = opts.lang ?? "en";
 	const lines: string[] = [];
-	if (snapshot.tier) lines.push(snapshot.tier);
+	if (snapshot.tier) lines.push(formatTierLabel(snapshot.tier));
 	const pct = displayPercent(snapshot.percentage);
 	const periodName = snapshot.period === "weekly" ? msg(lang, "periodWeekly") : snapshot.period === "monthly" ? msg(lang, "periodMonthly") : msg(lang, "periodUnknown");
-	const pctBit = pct === null ? (lang === "zh" ? "未知" : "unknown") : `${pct}% ${msg(lang, "used")}`;
-	const reset = formatReset(snapshot.resetAt, opts.now);
-	lines.push(`  ${msg(lang, "segIncluded")}  ${periodName}  ${pctBit}${reset ? `   ${msg(lang, "resetsIn", { t: reset })}` : ""}`);
-	if (snapshot.onDemandUsedUsd !== undefined || snapshot.onDemandCapUsd !== undefined) {
+	const pctBit = pct === null ? msg(lang, "usedUnknown") : msg(lang, "usedPct", { pct });
+	lines.push(`  ${msg(lang, "segIncluded")} (${periodName})  ${pctBit}`);
+	const reset = formatReset(snapshot.resetAt, opts.now, lang);
+	if (reset) lines.push(`  ${msg(lang, "resetLabel")}  ${reset}`);
+	if (hasMoney(snapshot.onDemandUsedUsd) || hasMoney(snapshot.onDemandCapUsd)) {
 		const used = snapshot.onDemandUsedUsd !== undefined ? `$${snapshot.onDemandUsedUsd.toFixed(2)}` : "?";
 		const cap = snapshot.onDemandCapUsd !== undefined ? `$${snapshot.onDemandCapUsd.toFixed(2)}` : "?";
 		lines.push(`  ${msg(lang, "segOnDemand")}  ${used} / ${cap}`);
 	}
-	if (snapshot.prepaidUsd !== undefined) {
+	if (hasMoney(snapshot.prepaidUsd)) {
 		lines.push(`  ${msg(lang, "segPrepaid")}  $${snapshot.prepaidUsd.toFixed(2)}`);
 	}
 	return lines.join("\n");

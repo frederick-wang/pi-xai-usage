@@ -236,7 +236,34 @@ test("report text lists included and on-demand separately", () => {
 	const snap = parseUsage(weeklyBilling, USER);
 	const text = buildReportText(snap, { now: Date.parse("2026-06-07T00:00:00Z"), lang: "en" });
 	assert.match(text, /SuperGrok/);
-	assert.match(text, /Included allowance/);
+	assert.match(text, /Included allowance \(weekly\)/);
+	assert.match(text, /43% used/);
 	assert.match(text, /On-demand/);
 	assert.match(text, /Prepaid/);
+	assert.doesNotMatch(text, /resets in/);
+});
+
+test("zh report uses 周二 not Tue, and hides zero on-demand/prepaid", () => {
+	const snap: UsageSnapshot = {
+		tier: "XPremiumPlus",
+		percentage: 16,
+		period: "weekly",
+		resetAt: Date.UTC(2026, 8, 1, 16, 37),
+		periodStart: Date.UTC(2026, 7, 25),
+		onDemandUsedUsd: 0,
+		onDemandCapUsd: 0,
+		prepaidUsd: 0,
+		fingerprint: FP,
+	};
+	const now = Date.UTC(2026, 7, 29, 4, 0);
+	const text = buildReportText(snap, { now, lang: "zh" });
+	assert.match(text, /X Premium Plus/);
+	assert.match(text, /套餐额度 \(周\)/);
+	assert.match(text, /已用 16%/);
+	assert.match(text, /重置/);
+	assert.doesNotMatch(text, /Tue|Mon|Wed|Thu|Fri|Sat|Sun/);
+	assert.match(text, /周[一二三四五六日]/);
+	assert.doesNotMatch(text, /按需/);
+	assert.doesNotMatch(text, /预付/);
+	assert.doesNotMatch(text, /\$0\.00/);
 });
