@@ -1,6 +1,6 @@
 {
   "name": "pi-xai-usage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "xAI SuperGrok / X Premium subscription usage in the pi footer — status bar, threshold alerts, /xai-usage report. Unofficial, not affiliated with xAI.",
   "type": "module",
   "license": "MIT",

@@ -7,6 +7,7 @@ import {
 	estimateQuotaRate,
 	evaluateAlerts,
 	formatReset,
+	formatTierLabel,
 	parseUsage,
 	parseUserId,
 	quotaRunwayHours,
@@ -67,6 +68,16 @@ test("parseUsage legacy monthly cents when percent absent", () => {
 	assert.equal(snap.period, "monthly");
 	assert.ok(snap.percentage !== null);
 	assert.equal(Math.round(snap.percentage! * 100) / 100, 61.7);
+});
+
+test("formatTierLabel: XPremiumPlus → X Premium Plus; SuperGrok unchanged", () => {
+	assert.equal(formatTierLabel("XPremiumPlus"), "X Premium Plus");
+	assert.equal(formatTierLabel("SuperGrok"), "SuperGrok");
+});
+
+test("parseUsage maps XPremiumPlus for overlay/json display", () => {
+	const snap = parseUsage({ config: { creditUsagePercent: 13 }, subscriptionTier: "XPremiumPlus" }, USER);
+	assert.equal(snap.tier, "X Premium Plus");
 });
 
 test("parseUsage hostile control chars stripped from tier", () => {

@@ -632,6 +632,21 @@ export function parseUserId(value: unknown): string {
 	return userId;
 }
 
+const TIER_LABELS: Record<string, string> = {
+	XPremiumPlus: "X Premium Plus",
+	SuperGrok: "SuperGrok",
+};
+
+/** Display label for a plan tier. Known ids are mapped; other PascalCase ids get spaces. */
+export function formatTierLabel(raw: string): string {
+	if (TIER_LABELS[raw]) return TIER_LABELS[raw];
+	return raw
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
 export function parseSubscriptionTier(value: unknown): string | undefined {
 	const raw = isRecord(value) ? value["subscriptionTier"] : undefined;
 	if (raw === undefined || raw === null) return undefined;
@@ -640,7 +655,8 @@ export function parseSubscriptionTier(value: unknown): string | undefined {
 		const cp = ch.codePointAt(0) ?? 0;
 		return cp > 0x1f && !(cp >= 0x7f && cp <= 0x9f);
 	}).join("").trim();
-	return cleaned.length > 0 ? cleaned.slice(0, 80) : undefined;
+	if (cleaned.length === 0) return undefined;
+	return formatTierLabel(cleaned).slice(0, 80);
 }
 
 function optionalCentsUsd(value: unknown): number | undefined {
