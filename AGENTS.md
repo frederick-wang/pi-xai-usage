@@ -26,7 +26,7 @@ A [pi coding agent](https://github.com/earendil-works/pi-mono) extension that su
 - pnpm 11 build policy: `pnpm-workspace.yaml` `allowBuilds` with `true`/`false` values (v10 names are ignored; `block` is invalid).
 - Editing `package.json` dependencies requires regenerating the lockfile in the same commit.
 - `gh pr checks` emits `pass`/`fail`; `gh run view` emits `success`/`failure`.
-- First npm publish uses repository secret `NPM_TOKEN` (`NODE_AUTH_TOKEN` via `actions/setup-node` + `registry-url`, then `npm publish --access public --provenance`). pnpm does not read `NODE_AUTH_TOKEN`. Later publishes can move to OIDC trusted publishing. `repository.url` must use the `git+https://` form. An anonymous PUT is **404**, not 401.
+- npm publish is OIDC trusted publishing: `actions/setup-node` + `registry-url`, then `npm publish --access public` with no `NODE_AUTH_TOKEN`. The trusted publisher is `frederick-wang/pi-xai-usage` workflow `release.yml`, no GitHub Environment. pnpm/setup alone yields ENEEDAUTH. `repository.url` must use the `git+https://` form. An anonymous PUT is **404**, not 401.
 - Reader-facing text carries no maintainer meta-notes; the zh README is written as Chinese a Chinese engineer would write.
 
 ## Agent skills
